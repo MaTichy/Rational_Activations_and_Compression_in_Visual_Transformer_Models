@@ -37,16 +37,16 @@ Rational activations consistently match or outperform fixed activations, and the
 
 ```mermaid
 flowchart LR
-    A["Image\n(B, C, H, W)"] --> B["Patch Embedding\nRearrange → LN → Linear → LN"]
-    B --> C["+ Sinusoidal 2D\nPos. Embedding"]
+    A["Image (B, C, H, W)"] --> B["Patch Embedding Rearrange → LN → Linear → LN"]
+    B --> C["+ Sinusoidal 2D Pos. Embedding"]
     C --> D["Transformer ×depth"]
     D --> E["Mean Pool"]
-    E --> F["LN → Linear\n→ logits"]
+    E --> F["LN → Linear → logits"]
 
     subgraph D["Transformer Block ×depth"]
         direction TB
-        D1["Pre-Norm\nMulti-Head Attention"] --> D2["+ Residual"]
-        D2 --> D3["Pre-Norm FFN\nLinear → Act → Linear"]
+        D1["Pre-Norm Multi-Head Attention"] --> D2["+ Residual"]
+        D2 --> D3["Pre-Norm FFN Linear → Act → Linear"]
         D3 --> D4["+ Residual"]
     end
 ```
@@ -79,12 +79,12 @@ flowchart LR
 ```mermaid
 flowchart TD
     A["Train to completion"] --> B["Identify lowest-magnitude weights"]
-    B --> C["Structured pruning\n(rows/columns)"]
+    B --> C["Structured pruning (rows/columns)"]
     C --> D["Rewind surviving weights\nto initial values"]
     D --> E["Retrain sparse network"]
     E --> F{More iterations?}
     F -->|Yes| B
-    F -->|No| G["Final sparse model\n(real speedup)"]
+    F -->|No| G["Final sparse model (real speedup)"]
 ```
 
 Structured pruning removes entire rows/columns, yielding dense sub-matrices that provide **actual hardware speedup** — not just theoretical sparsity.
