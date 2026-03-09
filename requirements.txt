@@ -1,0 +1,5 @@
+torch>=2.0
+torchvision>=0.15
+lightning>=2.0
+torchmetrics>=1.0
+einops>=0.7

@@ -1,0 +1,10 @@
+[project]
+name = "simplevit-rational-activations"
+version = "1.0.0"
+description = "SimpleViT with learnable rational activation functions and lottery ticket pruning"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

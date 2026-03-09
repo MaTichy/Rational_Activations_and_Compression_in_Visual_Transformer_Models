@@ -1,0 +1,36 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+    "name": "Python 3",
+    "image": "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+    "features": {
+        "ghcr.io/devcontainers/features/nvidia-cuda:1": {},
+        "ghcr.io/devcontainers-contrib/features/pipenv:2": {},
+        "ghcr.io/akhildevelops/devcontainer-features/pip:0": {}
+    },
+    "mounts": [
+        "source=/storage-01/datasets,target=/workspaces/Harnessing_The_Power_Of_Learnable_Activations_In_SimpleViT/datasets,type=bind"
+        //"source=/home/benchmarkbob/Documents/datasets/imagenet,target=/workspaces/Harnessing_The_Power_Of_Learnable_Activations_In_SimpleViT/datasets/imagenet,type=bind"
+    ],
+    "runArgs": [
+        "--shm-size=64g",
+        "--gpus=all",
+        "--cpuset-cpus=0-30"
+    ],
+
+    "forwardPorts": [6006],
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+    // "forwardPorts": [],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	"postCreateCommand": "pip3 install lightning einops linformer scipy matplotlib && apt-get update && apt-get install ninja-build && apt-get install -y cuda-toolkit-12-4"
+
+	// Configure tool-specific properties.
+	// "customizations": {},
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
+}
