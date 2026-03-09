@@ -96,6 +96,8 @@ Structured pruning removes entire rows/columns, yielding dense sub-matrices that
 | QKV projection | Rows (dim=0) | Reduces attention dimensions |
 | Output projection | Cols (dim=1) | Matches reduced attention |
 
+![Matrix Animation](https://github.com/MaTichy/Harnessing_The_Power_Of_Learnable_Activations_In_SimpleViT/blob/main/matrix_animation10.gif)
+
 ---
 
 ## Quick Start
