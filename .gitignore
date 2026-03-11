@@ -22,8 +22,8 @@ ENV/
 # macOS
 .DS_Store
 
-# Experiments
-experiments/
+# Experiments (keep results.json, ignore logs)
+experiments/logs/
 
 # Data & models
 data/

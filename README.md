@@ -17,15 +17,27 @@ The complete pipeline compares ReLU vs learnable rational activations across all
 
 | Variant | ReLU | Rational | Delta |
 |:--|:--:|:--:|:--:|
-| Original (10 epochs) | 67.4% | **73.0%** | +5.6% |
-| Pruned (75% FF / 50% Attn) | 74.9% | **76.7%** | +1.8% |
-| Compressed (zero neurons removed) | 74.9% | **76.7%** | +1.8% |
-| Quantised (INT8) | 67.4% | **73.0%** | +5.6% |
-| Compressed + Quantised | 74.9% | **76.7%** | +1.8% |
+| Original (20 epochs) | 78.7% | **81.8%** | +3.1% |
+| Pruned (75% FF / 50% Attn) | 80.6% | **82.4%** | +1.8% |
+| Compressed (zero neurons removed) | 80.6% | **82.4%** | +1.8% |
+| Quantised (INT8) | 78.6% | **81.9%** | +3.3% |
+| Compressed + Quantised | 80.6% | **82.3%** | +1.7% |
 
-> **Best model: rational compressed + quantised — 76.7% accuracy at 2.14 MB (5.7x compression from 12.13 MB)**
+> **Best model: rational compressed + quantised — 82.3% accuracy at 2.13 MB (5.7x compression from 12.13 MB)**
 
 Both activations **improve accuracy after LTH pruning** (winning tickets found), and structural compression preserves accuracy exactly.
+
+### Compression & Efficiency
+
+| Metric | Original | Compressed | Compressed + Quantised |
+|:--|:--:|:--:|:--:|
+| Model size | 12.13 MB | 8.02 -- 8.15 MB | **2.10 -- 2.13 MB** |
+| Parameters | 3.17 M | 2.09 -- 2.13 M | 2.09 -- 2.13 M |
+| Compression ratio | 1x | 1.5x | **5.7x** |
+| Parameter reduction | -- | 33% fewer | 33% fewer |
+| Storage savings | -- | 34% | **82%** |
+
+Structural compression physically removes zero neurons after pruning, creating genuinely smaller dense layers. Combined with INT8 quantisation, the final model is **5.7x smaller** while **improving accuracy by +1.9 percentage points** (ReLU) or **+0.5 pp** (Rational) over the unpruned baseline — a direct consequence of finding winning lottery tickets.
 
 ### Thesis Results (Full Training)
 
@@ -55,17 +67,16 @@ With full training schedules on additional datasets, rational activations consis
 
 ```mermaid
 flowchart LR
-    A["Image (B, C, H, W)"] --> B["Patch Embedding Rearrange → LN → Linear → LN"]
-    B --> C["+ Sinusoidal 2D Pos. Embedding"]
-    C --> D["Transformer ×depth"]
-    D --> E["Mean Pool"]
-    E --> F["LN → Linear → logits"]
+    A["Image (B, C, H, W)"] --> B["Patch Embedding"]
+    B --> C["+ Sinusoidal 2D Pos Emb"]
+    C --> T["Transformer x depth"]
+    T --> E["Mean Pool"]
+    E --> F["LN - Linear - logits"]
 
-    subgraph D["Transformer Block ×depth"]
+    subgraph T["Transformer Block"]
         direction TB
-        D1["Pre-Norm Multi-Head Attention"] --> D2["+ Residual"]
-        D2 --> D3["Pre-Norm FFN Linear → Act → Linear"]
-        D3 --> D4["+ Residual"]
+        T1["Pre-Norm Multi-Head Attention"] --> T2["+ Residual"]
+        T2 --> T3["Pre-Norm FFN"] --> T4["+ Residual"]
     end
 ```
 
@@ -79,8 +90,8 @@ Instead of a fixed activation function, each FFN block uses a **learnable ration
 
 ```mermaid
 flowchart LR
-    X["x"] --> P["P(x) = a₀ + a₁x + a₂x² + ⋯ + aₘxᵐ"]
-    X --> Q["|Q(x)| + 1 = |b₁x + b₂x² + ⋯ + bₙxⁿ| + 1"]
+    X["x"] --> P["P(x) = a0 + a1*x + a2*x^2 + ... + am*x^m"]
+    X --> Q["|Q(x)| + 1 = |b1*x + b2*x^2 + ... + bn*x^n| + 1"]
     P --> R["R(x) = P(x) / (|Q(x)| + 1)"]
     Q --> R
 ```
@@ -98,14 +109,14 @@ flowchart LR
 ```mermaid
 flowchart TD
     A["Train to completion"] --> B["Identify lowest-magnitude weights"]
-    B --> C["Structured pruning (rows/columns)"]
-    C --> D["Rewind surviving weights\nto initial values"]
+    B --> C["Structured pruning rows/columns"]
+    C --> D["Rewind surviving weights to initial values"]
     D --> E["Retrain sparse network"]
-    E --> F{More iterations?}
+    E --> F{"More iterations?"}
     F -->|Yes| B
-    F -->|No| G["Structural compression\n(remove zero neurons)"]
+    F -->|No| G["Structural compression - remove zero neurons"]
     G --> H["INT8 dynamic quantisation"]
-    H --> I["Final model\n(5.7x smaller, same accuracy)"]
+    H --> I["Final compressed model"]
 ```
 
 ### Pruning (Lottery Ticket Hypothesis)
@@ -118,8 +129,6 @@ Structured pruning removes entire rows/columns, yielding dense sub-matrices that
 | FF Layer 2 (`.net.3`) | Cols (dim=1) | Matches removed FF1 outputs |
 | QKV projection | Rows (dim=0) | Reduces attention dimensions |
 | Output projection | Cols (dim=1) | Matches reduced attention |
-
-![Matrix Animation](https://github.com/MaTichy/Harnessing_The_Power_Of_Learnable_Activations_In_SimpleViT/blob/main/matrix_animation10.gif)
 
 ### Structural Compression
 

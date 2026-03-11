@@ -24,9 +24,9 @@ from pruning.compress import compress_pruned_model
 
 # ── Configuration ──────────────────────────────────────────────────────
 SEED = 42
-TRAINING_EPOCHS = 10
-PRUNING_ITERATIONS = 3
-EPOCHS_PER_PRUNE_ROUND = 3
+TRAINING_EPOCHS = 20
+PRUNING_ITERATIONS = 4
+EPOCHS_PER_PRUNE_ROUND = 5
 TOTAL_PRUNE_FF = 0.75
 TOTAL_PRUNE_ATTN = 0.50
 BATCH_SIZE = 64
