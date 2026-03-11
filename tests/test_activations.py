@@ -50,7 +50,7 @@ class TestRationalActivation:
         y = act(x)
         assert torch.isfinite(y).all()
 
-    @pytest.mark.parametrize("init", ["uniform", "normal"])
+    @pytest.mark.parametrize("init", ["uniform", "normal", "relu"])
     def test_init_strategies(self, init):
         act = RationalActivation(init=init)
         assert act.coeff_numerator.shape == (5,)

@@ -5,13 +5,31 @@
 ![Lightning](https://img.shields.io/badge/Lightning-2.0%2B-792ee5?logo=lightning)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-A Simple Vision Transformer with **learnable rational activation functions** (Padé approximants) and **structured iterative pruning** via the Lottery Ticket Hypothesis. Accompanying code for the bachelor thesis *"Harnessing the Power of Pruning and Learnable Activations in Transformer Networks"* (TU Darmstadt, 2023).
+A Simple Vision Transformer with **learnable rational activation functions** (Padé approximants), **structured iterative pruning** via the Lottery Ticket Hypothesis, **structural compression**, and **INT8 dynamic quantisation**. Accompanying code for the bachelor thesis *"Harnessing the Power of Pruning and Learnable Activations in Transformer Networks"* (TU Darmstadt, 2023).
 
 ---
 
 ## Key Results
 
-Rational activations consistently match or outperform fixed activations, and the pruned models retain accuracy even at extreme sparsity:
+### Full Pipeline: Train → Prune → Compress → Quantise (CIFAR-10)
+
+The complete pipeline compares ReLU vs learnable rational activations across all compression stages. Rational activations are initialised from a ReLU-approximating Padé fit, then learned end-to-end:
+
+| Variant | ReLU | Rational | Delta |
+|:--|:--:|:--:|:--:|
+| Original (10 epochs) | 67.4% | **73.0%** | +5.6% |
+| Pruned (75% FF / 50% Attn) | 74.9% | **76.7%** | +1.8% |
+| Compressed (zero neurons removed) | 74.9% | **76.7%** | +1.8% |
+| Quantised (INT8) | 67.4% | **73.0%** | +5.6% |
+| Compressed + Quantised | 74.9% | **76.7%** | +1.8% |
+
+> **Best model: rational compressed + quantised — 76.7% accuracy at 2.14 MB (5.7x compression from 12.13 MB)**
+
+Both activations **improve accuracy after LTH pruning** (winning tickets found), and structural compression preserves accuracy exactly.
+
+### Thesis Results (Full Training)
+
+With full training schedules on additional datasets, rational activations consistently match or outperform fixed activations:
 
 | Dataset | GELU | ReLU | SiLU | Rational |
 |:--|:--:|:--:|:--:|:--:|
@@ -68,13 +86,14 @@ flowchart LR
 ```
 
 - Coefficients are **learned end-to-end** via backpropagation
+- **ReLU-initialised** — Padé coefficients are fitted to approximate ReLU, giving a strong starting point that the network can adapt during training
 - Evaluated using **Horner's method** for numerical stability
 - The `|Q(x)| + 1` denominator guarantees no division by zero
 - A single AdamW optimizer uses **parameter groups** with separate learning rates: standard LR + weight decay for model weights, higher LR + no weight decay for activation coefficients
 
 ---
 
-## Pruning Pipeline
+## Compression Pipeline
 
 ```mermaid
 flowchart TD
@@ -84,8 +103,12 @@ flowchart TD
     D --> E["Retrain sparse network"]
     E --> F{More iterations?}
     F -->|Yes| B
-    F -->|No| G["Final sparse model (real speedup)"]
+    F -->|No| G["Structural compression\n(remove zero neurons)"]
+    G --> H["INT8 dynamic quantisation"]
+    H --> I["Final model\n(5.7x smaller, same accuracy)"]
 ```
+
+### Pruning (Lottery Ticket Hypothesis)
 
 Structured pruning removes entire rows/columns, yielding dense sub-matrices that provide **actual hardware speedup** — not just theoretical sparsity.
 
@@ -97,6 +120,14 @@ Structured pruning removes entire rows/columns, yielding dense sub-matrices that
 | Output projection | Cols (dim=1) | Matches reduced attention |
 
 ![Matrix Animation](https://github.com/MaTichy/Harnessing_The_Power_Of_Learnable_Activations_In_SimpleViT/blob/main/matrix_animation10.gif)
+
+### Structural Compression
+
+After pruning, zero neurons are **physically removed** from the model, creating genuinely smaller linear layers. A neuron is only removed if it is dead in both the expansion layer (net.1 row = 0) **and** the projection layer (net.3 column = 0). This is critical for non-ReLU activations where `f(0) != 0` — rational activations with `R(0) = a₀` can route information through "dead" neurons.
+
+### INT8 Quantisation
+
+Dynamic INT8 quantisation via `torch.ao.quantization.quantize_dynamic` targets all `nn.Linear` layers. Supports both `fbgemm` (x86/NVIDIA) and `qnnpack` (ARM/Apple Silicon) backends, selected automatically.
 
 ---
 
@@ -118,7 +149,23 @@ python verify.py
 
 Runs forward/backward passes with both GELU and rational activations on the best available device (CPU, MPS, or CUDA).
 
-### Train
+### Run Full Experiment
+
+```bash
+python run_experiment.py
+```
+
+Trains both ReLU and rational models, prunes, compresses, and quantises. Results are saved incrementally to `experiments/results.json`.
+
+### Launch Dashboard
+
+```bash
+streamlit run dashboard.py
+```
+
+Interactive Streamlit + Plotly dashboard for visualising training curves, pruning results, compression ratios, and accuracy comparisons.
+
+### Train Standalone
 
 ```bash
 # Baseline with GELU
@@ -133,6 +180,22 @@ python train_example.py --fast-dev-run
 
 ---
 
+## System Support
+
+The codebase runs on both **remote Linux + NVIDIA GPU** servers and **local macOS + Apple Silicon** setups:
+
+| Feature | Linux + CUDA | macOS + MPS |
+|:--|:--:|:--:|
+| Training | CUDA | MPS |
+| Pruning | CPU (device-safe) | CPU (device-safe) |
+| Compression | CPU | CPU |
+| Quantisation (INT8) | fbgemm | qnnpack |
+| CUDA kernel (optional) | hulk_boost | N/A (pure PyTorch fallback) |
+
+Accelerator detection is automatic via `torch.cuda.is_available()` / `torch.backends.mps.is_available()`. Pruning is performed on CPU to avoid device conflicts in PyTorch's pruning internals, with Lightning handling accelerator transfers for training.
+
+---
+
 ## Project Structure
 
 ```
@@ -142,10 +205,12 @@ python train_example.py --fast-dev-run
 │   ├── model.py           # SimpleViT (Lightning module)
 │   ├── activations.py     # Rational activation (PyTorch + CUDA)
 │   ├── config.py          # ViTConfig dataclass + presets
+│   ├── quantisation.py    # INT8 dynamic quantisation utilities
 │   ├── schedulers.py      # Warmup + cosine/step LR schedulers
 │   └── data.py            # CIFAR-10 / Imagenette loaders
 ├── pruning/
-│   └── lottery_ticket.py  # Iterative structured pruning (LTH)
+│   ├── lottery_ticket.py  # Iterative structured pruning (LTH)
+│   └── compress.py        # Structural compression (remove zero neurons)
 ├── cuda/
 │   ├── hulk_boost_*       # CUDA kernel (Horner's method)
 │   └── eras_*             # Enhanced rational activation kernel
@@ -153,6 +218,8 @@ python train_example.py --fast-dev-run
 │   ├── test_activations.py
 │   ├── test_model.py
 │   └── test_pruning.py
+├── run_experiment.py      # Full pipeline: train → prune → compress → quantise
+├── dashboard.py           # Streamlit + Plotly results dashboard
 ├── verify.py              # Installation verification
 ├── train_example.py       # Training CLI
 ├── thesis.pdf             # Full bachelor thesis

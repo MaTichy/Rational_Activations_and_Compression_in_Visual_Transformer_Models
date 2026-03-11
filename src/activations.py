@@ -27,19 +27,33 @@ class RationalActivation(nn.Module):
         init: Initialization strategy - 'uniform' or 'normal'.
     """
 
+    # Coefficients that approximate ReLU for [5/4] Padé form R(x) = P(x)/(|Q(x)*x|+1).
+    # Fitted via least-squares over [-6, 6] with a_0=0 constraint so R(0)=0.
+    _RELU_NUMERATOR = [0.0, 0.526, 0.844, 0.352, 0.041]
+    _RELU_DENOMINATOR = [0.055, -0.884, 0.082, -0.009]
+
     def __init__(self, num_numerator: int = 5, num_denominator: int = 4, init: str = "uniform"):
         super().__init__()
         self.num_numerator = num_numerator
         self.num_denominator = num_denominator
 
-        if init == "uniform":
+        if init == "relu":
+            assert num_numerator == 5 and num_denominator == 4, \
+                "ReLU init only supports [5/4] Padé (num_numerator=5, num_denominator=4)"
+            self.coeff_numerator = nn.Parameter(
+                torch.tensor(self._RELU_NUMERATOR, dtype=torch.float32)
+            )
+            self.coeff_denominator = nn.Parameter(
+                torch.tensor(self._RELU_DENOMINATOR, dtype=torch.float32)
+            )
+        elif init == "uniform":
             self.coeff_numerator = nn.Parameter(torch.rand(num_numerator))
             self.coeff_denominator = nn.Parameter(torch.rand(num_denominator))
         elif init == "normal":
             self.coeff_numerator = nn.Parameter(torch.randn(num_numerator))
             self.coeff_denominator = nn.Parameter(torch.randn(num_denominator))
         else:
-            raise ValueError(f"Unknown init strategy: {init}. Use 'uniform' or 'normal'.")
+            raise ValueError(f"Unknown init strategy: {init}. Use 'relu', 'uniform', or 'normal'.")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Horner's method for numerical stability: P(x) = a_0 + x*(a_1 + x*(a_2 + ...))

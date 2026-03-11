@@ -3,3 +3,6 @@ torchvision>=0.15
 lightning>=2.0
 torchmetrics>=1.0
 einops>=0.7
+streamlit>=1.30
+plotly>=5.18
+pandas>=2.0

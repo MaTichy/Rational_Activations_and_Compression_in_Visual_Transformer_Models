@@ -60,7 +60,7 @@ def _resolve_activation(identifier: str) -> nn.Module:
     if identifier in activations:
         return activations[identifier]()
     if identifier == "rational":
-        return RationalActivation()
+        return RationalActivation(init="relu")
     raise ValueError(f"Unknown activation: {identifier}. Choose from {list(activations.keys()) + ['rational']}")
 
 

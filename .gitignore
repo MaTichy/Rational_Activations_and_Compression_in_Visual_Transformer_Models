@@ -22,6 +22,9 @@ ENV/
 # macOS
 .DS_Store
 
+# Experiments
+experiments/
+
 # Data & models
 data/
 datasets/

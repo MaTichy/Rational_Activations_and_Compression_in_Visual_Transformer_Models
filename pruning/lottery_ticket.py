@@ -37,6 +37,29 @@ def calculate_per_iteration_prune_ratio(total_prune_pct: float, iterations: int)
     return round(1 - (1 - total_prune_pct) ** (1 / iterations), 4)
 
 
+def _compute_sparsity(model: nn.Module) -> dict[str, float]:
+    """Compute sparsity percentages for FF and attention layers."""
+    ff_total = ff_zeros = attn_total = attn_zeros = 0
+    for name, module in model.named_modules():
+        if "transformer.layers" not in name or not isinstance(module, nn.Linear):
+            continue
+        w = module.weight
+        if hasattr(module, "weight_mask"):
+            w = w * module.weight_mask.to(w.device)
+        numel = w.numel()
+        zeros = (w == 0).sum().item()
+        if ".net.1" in name or ".net.3" in name:
+            ff_total += numel
+            ff_zeros += zeros
+        elif ".to_qkv" in name or ".to_out" in name:
+            attn_total += numel
+            attn_zeros += zeros
+    return {
+        "sparsity_ff": round(ff_zeros / ff_total, 4) if ff_total else 0.0,
+        "sparsity_attn": round(attn_zeros / attn_total, 4) if attn_total else 0.0,
+    }
+
+
 def run_iterative_pruning(
     trained_model: pl.LightningModule,
     initial_model: nn.Module,
@@ -50,7 +73,8 @@ def run_iterative_pruning(
     epochs_per_round: int = 30,
     devices=1,
     accelerator="auto",
-) -> pl.LightningModule:
+    logger=None,
+) -> tuple[pl.LightningModule, list[dict]]:
     """Run iterative structured pruning with weight rewinding.
 
     Args:
@@ -66,24 +90,42 @@ def run_iterative_pruning(
         epochs_per_round: Training epochs per pruning round.
         devices: Number of devices for Lightning Trainer.
         accelerator: Accelerator type ('gpu', 'mps', 'cpu', 'auto').
-    """
-    device = next(trained_model.parameters()).device
+        logger: Optional Lightning logger (e.g., CSVLogger) for training logs.
 
+    Returns:
+        Tuple of (pruned_model, round_stats) where round_stats is a list of
+        dicts with keys: round, sparsity_ff, sparsity_attn, test_acc_after_round.
+    """
     ratio_ff = calculate_per_iteration_prune_ratio(total_prune_pct_ff, pruning_iterations)
     ratio_attn = calculate_per_iteration_prune_ratio(total_prune_pct_attn, pruning_iterations)
 
     print(f"Feed-forward: {total_prune_pct_ff*100:.1f}% total, {ratio_ff*100:.2f}% per iteration")
     print(f"Attention:    {total_prune_pct_attn*100:.1f}% total, {ratio_attn*100:.2f}% per iteration")
 
+    # Keep initial model on CPU (only used for weight rewinding during pruning)
+    initial_model = initial_model.cpu()
+    round_stats = []
+
     for i in range(pruning_iterations):
         print(f"\n--- Pruning iteration {i + 1}/{pruning_iterations} ---")
+
+        # Move model to CPU for pruning to avoid MPS/CPU device conflicts
+        # in PyTorch's pruning internals (PruningContainer._combine_masks).
+        # Lightning's trainer.fit() will move it back to the accelerator.
+        trained_model = trained_model.cpu()
+
+        # PyTorch pruning's forward_pre_hook caches `module.weight` as a plain
+        # attribute (not a parameter/buffer) from the last forward pass on MPS.
+        # model.cpu() doesn't move plain attributes, so we must recompute them.
+        for _, m in trained_model.named_modules():
+            if isinstance(m, nn.Linear) and hasattr(m, "weight_orig"):
+                m.weight = m.weight_orig * m.weight_mask
 
         for name, module in trained_model.named_modules():
             if "transformer.layers" not in name or not isinstance(module, nn.Linear):
                 continue
 
-            module = module.to(device)
-            original = dict(initial_model.named_modules())[name].to(device)
+            original = dict(initial_model.named_modules())[name]
 
             if ".net.1" in name:
                 # FF first layer: prune rows (output neurons)
@@ -98,25 +140,36 @@ def run_iterative_pruning(
 
         trainer = pl.Trainer(
             max_epochs=epochs_per_round, devices=devices,
-            accelerator=accelerator, logger=True,
+            accelerator=accelerator, logger=logger if logger else True,
         )
         trainer.fit(trained_model, train_loader, val_loader)
 
-    if test_loader is not None:
-        test_trainer = pl.Trainer(devices=devices, accelerator=accelerator, logger=False)
-        test_trainer.test(trained_model, test_loader)
+        # Collect per-round stats
+        sparsity = _compute_sparsity(trained_model)
+        round_acc = None
+        if test_loader is not None:
+            test_trainer = pl.Trainer(devices=devices, accelerator=accelerator, logger=False)
+            results = test_trainer.test(trained_model, test_loader, verbose=False)
+            if results:
+                round_acc = results[0].get("test_acc")
 
-    return trained_model
+        round_stats.append({
+            "round": i + 1,
+            "sparsity_ff": sparsity["sparsity_ff"],
+            "sparsity_attn": sparsity["sparsity_attn"],
+            "test_acc_after_round": round_acc,
+        })
+
+    return trained_model, round_stats
 
 
 def _prune_and_rewind(module, original, ratio, norm, dim, prune_bias=False) -> None:
     """Apply structured pruning and rewind surviving weights to initial values."""
-    device = module.weight.device
     prune.ln_structured(module, name="weight", n=norm, amount=ratio, dim=dim)
 
-    mask = module.weight_mask.to(device)
-    module.weight.data = torch.where(mask != 0, original.weight.data.to(device), module.weight.data)
+    mask = module.weight_mask
+    module.weight.data = torch.where(mask != 0, original.weight.data, module.weight.data)
 
     if prune_bias and module.bias is not None:
         bias_mask = mask.sum(dim=1) != 0
-        module.bias.data = torch.where(bias_mask, original.bias.data.to(device), torch.zeros_like(module.bias.data))
+        module.bias.data = torch.where(bias_mask, original.bias.data, torch.zeros_like(module.bias.data))
